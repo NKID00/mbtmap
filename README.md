@@ -23,6 +23,10 @@ moon run -g src/bin/main.mbt |& mbtmap target/wasm-gc/debug/build/bin/bin.wasm.m
  error: failed to run
 ```
 
+## Caveat if piping from `moon run -g`
+
+If stdin of mbtmap is piped from `moon run -g`, the sourcemap may be stale after compilation and its content won't update before program and moon exit. Mbtmap will wait until stdin has been closed to try to make sure sourcemap has been freshly emitted and then resolve source locations. If this is not applicable or interactive is needed, pass `-l` option to mbtmap to fall back to line-buffered filter. This way, it is necessary to build and generate fresh sourcemap beforehand.
+
 #### License
 
 <sup>

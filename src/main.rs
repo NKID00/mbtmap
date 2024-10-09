@@ -4,7 +4,7 @@ use regex::{Captures, Regex};
 use sourcemap::SourceMap;
 use std::env::current_dir;
 use std::fs::{File, OpenOptions};
-use std::io::{self, BufRead, BufReader, Stdin};
+use std::io::{self, BufRead, BufReader, Read, Stdin};
 use std::path::PathBuf;
 
 #[derive(Parser, Debug)]
@@ -19,6 +19,9 @@ struct Args {
     /// Use absolute path to source files resolved instead of relative to current working directory
     #[arg(short = 'p', long)]
     absolute_path: bool,
+    /// Filter with line buffer instead of waiting stdin to close and then filter all the input, see README for caveat related
+    #[arg(short = 'l', long)]
+    line_buffer: bool,
 }
 
 #[derive(Debug)]
@@ -36,12 +39,27 @@ impl Input {
         Ok(this)
     }
 
+    fn read_to_string(&mut self) -> Result<String> {
+        let mut buf = String::new();
+        match self {
+            Input::File(file) => file.read_to_string(&mut buf)?,
+            Input::Stdin(stdin) => stdin.read_to_string(&mut buf)?,
+        };
+        Ok(buf)
+    }
+
     fn read_line(&mut self, buf: &mut String) -> Result<usize> {
         Ok(match self {
             Input::File(file) => file.read_line(buf)?,
             Input::Stdin(stdin) => stdin.read_line(buf)?,
         })
     }
+}
+
+fn read_source_map(path: &str) -> Result<SourceMap> {
+    Ok(SourceMap::from_reader(
+        OpenOptions::new().read(true).open(path)?,
+    )?)
 }
 
 fn resolve(map: &SourceMap, addr: &str, cwd: &Option<PathBuf>) -> Option<String> {
@@ -73,22 +91,18 @@ fn resolve(map: &SourceMap, addr: &str, cwd: &Option<PathBuf>) -> Option<String>
 
 fn main() -> Result<()> {
     let args = Args::parse();
-    let map = SourceMap::from_reader(OpenOptions::new().read(true).open(args.sourcemap)?)?;
+    let mut input = Input::open(args.input)?;
     let cwd = if args.absolute_path {
         None
     } else {
         Some(current_dir()?)
     };
-    let mut input = Input::open(args.input)?;
-    // wasm://wasm/000c5502:wasm-function[1060]:0x2648d
+    // "wasm://wasm/000c5502:wasm-function[1060]:0x2648d"
     let re = Regex::new(r"wasm\://.*\:.*\:((?:0x)?[[:xdigit:]]+)")?;
-    let mut buf = String::new();
-    loop {
-        buf.clear();
-        if input.read_line(&mut buf)? == 0 {
-            break;
-        }
-        let result = re.replace_all(&buf, |caps: &Captures| {
+    if !args.line_buffer {
+        let input = input.read_to_string()?;
+        let map = read_source_map(&args.sourcemap)?;
+        let result = re.replace_all(&input, |caps: &Captures| {
             format!(
                 "{} {}",
                 &caps[0],
@@ -99,6 +113,27 @@ fn main() -> Result<()> {
             print!("{result}")
         } else {
             eprint!("{result}")
+        }
+    } else {
+        let map = read_source_map(&args.sourcemap)?;
+        let mut buf = String::new();
+        loop {
+            buf.clear();
+            if input.read_line(&mut buf)? == 0 {
+                break;
+            }
+            let result = re.replace_all(&buf, |caps: &Captures| {
+                format!(
+                    "{} {}",
+                    &caps[0],
+                    resolve(&map, &caps[1], &cwd).unwrap_or_default()
+                )
+            });
+            if args.stdout {
+                print!("{result}")
+            } else {
+                eprint!("{result}")
+            }
         }
     }
     Ok(())
