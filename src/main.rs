@@ -36,10 +36,10 @@ impl Input {
         Ok(this)
     }
 
-    fn read_line(&mut self, mut buf: &mut String) -> Result<usize> {
+    fn read_line(&mut self, buf: &mut String) -> Result<usize> {
         Ok(match self {
-            Input::File(file) => file.read_line(&mut buf)?,
-            Input::Stdin(stdin) => stdin.read_line(&mut buf)?,
+            Input::File(file) => file.read_line(buf)?,
+            Input::Stdin(stdin) => stdin.read_line(buf)?,
         })
     }
 }
